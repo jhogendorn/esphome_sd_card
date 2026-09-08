@@ -14,8 +14,12 @@ SDFileServer::SDFileServer(web_server_base::WebServerBase *base) : base_(base) {
 void SDFileServer::setup() { this->base_->add_handler(this); }
 
 void SDFileServer::dump_config() {
+  // ESPHome 2026.7.0 (esphome/esphome#17432) replaced network::get_use_address()
+  // with get_use_address_to(), which writes into a caller-supplied buffer instead
+  // of returning a string. Hard break, no compatibility shim.
+  char addr_buf[network::USE_ADDRESS_BUFFER_SIZE];
   ESP_LOGCONFIG(TAG, "SD File Server:");
-  ESP_LOGCONFIG(TAG, "  Address: %s:%u", network::get_use_address(), this->base_->get_port());
+  ESP_LOGCONFIG(TAG, "  Address: %s:%u", network::get_use_address_to(addr_buf), this->base_->get_port());
   ESP_LOGCONFIG(TAG, "  Url Prefix: %s", this->url_prefix_.c_str());
   ESP_LOGCONFIG(TAG, "  Root Path: %s", this->root_path_.c_str());
   ESP_LOGCONFIG(TAG, "  Deletation Enabled: %s", TRUEFALSE(this->deletion_enabled_));
@@ -24,14 +28,19 @@ void SDFileServer::dump_config() {
 }
 
 bool SDFileServer::canHandle(AsyncWebServerRequest *request) const {
-  ESP_LOGD(TAG, "can handle %s %u", request->url().c_str(),
-           str_startswith(std::string(request->url().c_str()), this->build_prefix()));
-  return str_startswith(std::string(request->url().c_str()), this->build_prefix());
+  // url() is deprecated since 2026.3.0 and removed in 2026.9.0; url_to() writes
+  // into a caller-supplied buffer and returns a StringRef.
+  char url_buf[AsyncWebServerRequest::URL_BUF_SIZE];
+  std::string url(request->url_to(url_buf));
+  ESP_LOGD(TAG, "can handle %s %u", url.c_str(), str_startswith(url, this->build_prefix()));
+  return str_startswith(url, this->build_prefix());
 }
 
 void SDFileServer::handleRequest(AsyncWebServerRequest *request) {
-  ESP_LOGD(TAG, "%s", request->url().c_str());
-  if (str_startswith(std::string(request->url().c_str()), this->build_prefix())) {
+  char url_buf[AsyncWebServerRequest::URL_BUF_SIZE];
+  std::string url(request->url_to(url_buf));
+  ESP_LOGD(TAG, "%s", url.c_str());
+  if (str_startswith(url, this->build_prefix())) {
     if (request->method() == HTTP_GET) {
       this->handle_get(request);
       return;
@@ -49,7 +58,8 @@ void SDFileServer::handleUpload(AsyncWebServerRequest *request, const std::strin
     request->send(401, "application/json", "{ \"error\": \"file upload is disabled\" }");
     return;
   }
-  std::string extracted = this->extract_path_from_url(std::string(request->url().c_str()));
+  char url_buf[AsyncWebServerRequest::URL_BUF_SIZE];
+  std::string extracted = this->extract_path_from_url(std::string(request->url_to(url_buf)));
   std::string path = this->build_absolute_path(extracted);
 
   if (index == 0 && !this->sd_mmc_card_->is_directory(path)) {
@@ -86,7 +96,8 @@ void SDFileServer::set_download_enabled(bool allow) { this->download_enabled_ = 
 void SDFileServer::set_upload_enabled(bool allow) { this->upload_enabled_ = allow; }
 
 void SDFileServer::handle_get(AsyncWebServerRequest *request) const {
-  std::string extracted = this->extract_path_from_url(std::string(request->url().c_str()));
+  char url_buf[AsyncWebServerRequest::URL_BUF_SIZE];
+  std::string extracted = this->extract_path_from_url(std::string(request->url_to(url_buf)));
   std::string path = this->build_absolute_path(extracted);
 
   if (!this->sd_mmc_card_->is_directory(path)) {
@@ -339,7 +350,8 @@ void SDFileServer::handle_delete(AsyncWebServerRequest *request) {
     request->send(401, "application/json", "{ \"error\": \"file deletion is disabled\" }");
     return;
   }
-  std::string extracted = this->extract_path_from_url(std::string(request->url().c_str()));
+  char url_buf[AsyncWebServerRequest::URL_BUF_SIZE];
+  std::string extracted = this->extract_path_from_url(std::string(request->url_to(url_buf)));
   std::string path = this->build_absolute_path(extracted);
   if (this->sd_mmc_card_->is_directory(path)) {
     request->send(401, "application/json", "{ \"error\": \"cannot delete a directory\" }");
