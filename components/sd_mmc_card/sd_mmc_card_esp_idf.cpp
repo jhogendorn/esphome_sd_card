@@ -1,4 +1,6 @@
 #include "sd_mmc_card.h"
+#include <cerrno>
+#include <cstring>
 
 #ifdef USE_ESP_IDF
 #include "math.h"
@@ -78,7 +80,8 @@ void SdMmc::write_file(const char *path, const uint8_t *buffer, size_t len, cons
   FILE *file = NULL;
   file = fopen(absolut_path.c_str(), mode);
   if (file == NULL) {
-    ESP_LOGE(TAG, "Failed to open file for writing");
+    ESP_LOGE(TAG, "Failed to open file for writing: path='%s' mode='%s' errno=%d (%s)", absolut_path.c_str(), mode,
+             errno, strerror(errno));
     return;
   }
   bool ok = fwrite(buffer, 1, len, file);
